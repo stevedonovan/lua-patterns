@@ -1,7 +1,7 @@
-extern crate libc;
-use libc::{size_t,c_int};
 use std::ptr;
 use std::ops;
+use std::os::raw::{c_int,c_char,c_uint};
+use std::ffi::CStr;
 
 #[repr(C)]
 #[derive(PartialEq,Eq,Debug)]
@@ -12,13 +12,13 @@ struct LuaMatch {
 
 static LUA_MAXCAPTURES: usize = 32;
 
-// int str_match (const char *s, size_t ls, const char *p, size_t lp, char **err_msg, LuaMatch *mm)
 #[link(name = "lua-str", kind="static")]
 extern {
-    fn str_match (s: *const u8, ls: size_t, p: *const u8, lp: size_t,
-        //err_msg: *mut *const u8,
-        err_msg: *const u8,
-        mm: *mut LuaMatch) -> c_int;
+    fn str_match (
+        s: *const u8, ls: c_uint, p: *const u8, lp: c_uint,
+        err_msg: *mut *mut c_char,
+        mm: *mut LuaMatch
+        ) -> c_int;
 }
 
 pub struct LuaPattern<'a> {
@@ -39,13 +39,21 @@ impl <'a> LuaPattern<'a> {
     }
 
     pub fn matches_bytes(&mut self, s: &[u8]) -> bool {
-        let err_msg: *const u8 = ptr::null();
+        let c_ptr: *mut c_char = ptr::null_mut();
+        let pvoid = Box::into_raw(Box::new(c_ptr));
+        let err_msg : *mut *mut c_char = pvoid;
 
         unsafe {
-           self.n_match = str_match(s.as_ptr(),s.len() as size_t,
-                self.patt.as_ptr(),self.patt.len() as size_t,
+           self.n_match = str_match(s.as_ptr(),s.len() as c_uint,
+                self.patt.as_ptr(),self.patt.len() as c_uint,
                 err_msg, self.matches.as_mut_ptr()) as usize;
+            let ep = *err_msg;
+            if ! ep.is_null() {
+                let slice = CStr::from_ptr(ep);
+                println!("{:?}", slice);
+            }
         }
+
         self.n_match > 0
     }
 

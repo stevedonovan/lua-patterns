@@ -6,7 +6,6 @@ links = "foo"
 build = "build.rs"
 
 [dependencies]
-libc="0.2.0"
 
 [build-dependencies]
 gcc="0.3"

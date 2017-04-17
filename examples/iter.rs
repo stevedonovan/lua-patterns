@@ -3,6 +3,12 @@ extern crate lua_patterns as lp;
 
 
 fn main() {
+
+    let mut m = lp::LuaPattern::new("hello%");
+    m.matches("hello");
+    println!("ok");
+
+    ///*
     let mut m = lp::LuaPattern::new("(%a+)");
     let mut iter = m.gmatch("one two three");
     assert_eq!(iter.next(), Some("one"));
@@ -31,6 +37,9 @@ fn main() {
         |cc| cc.get(1).to_uppercase()
     );
     assert_eq!(res,"hello DOLLY you're so FINE");
+    //*/
+
+
 
 
 }

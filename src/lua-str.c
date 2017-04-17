@@ -82,6 +82,7 @@ static int capture_to_close (MatchState *ms) {
 
 
 static const char *classend (MatchState *ms, const char *p) {
+
   switch (*p++) {
     case L_ESC: {
       if (p == ms->p_end)
@@ -384,13 +385,19 @@ static int push_captures (MatchState *ms, const char *s, const char *e, LuaMatch
 }
 
 
-int str_match (const char *s, size_t ls, const char *p, size_t lp, char **err_msg, LuaMatch *mm) {
+int str_match (const char *s, unsigned int ls, const char *p, unsigned int lp, char **err_msg, LuaMatch *mm) {
   const char *s1 = s;
   MatchState ms;
   int anchor = (*p == '^');
   if (anchor) {
     p++; lp--;  /* skip anchor character */
   }
+
+  if (setjmp(s_jmp_buf) != 0) {
+    if (err_msg != NULL) *err_msg = s_msg_buff;
+    return 0;
+  }
+
   ms.matchdepth = MAXCCALLS;
   ms.src_init = s;
   ms.src_end = s + ls;
@@ -405,11 +412,6 @@ int str_match (const char *s, size_t ls, const char *p, size_t lp, char **err_ms
     }
   } while (s1++ < ms.src_end && !anchor);
 
-  if (setjmp(s_jmp_buf) != 0) {
-    if (err_msg != NULL) *err_msg = s_msg_buff;
-  } else {
-    if (err_msg != NULL) *err_msg = NULL;
-  }
   return 0;
 }
 
