@@ -49,8 +49,7 @@ impl <'a> LuaPattern<'a> {
                 err_msg, self.matches.as_mut_ptr()) as usize;
             let ep = *err_msg;
             if ! ep.is_null() {
-                let slice = CStr::from_ptr(ep);
-                println!("{:?}", slice);
+                panic!(format!("lua-pattern {:?}",CStr::from_ptr(ep)));
             }
         }
 
@@ -77,16 +76,16 @@ impl <'a> LuaPattern<'a> {
         self.matches(text);
         vec.clear();
         for i in 0..self.n_match {
-            vec.push(&text[self.bounds(i)]);
+            vec.push(&text[self.capture(i)]);
         }
         self.n_match > 0
     }
 
     pub fn range(&self) -> ops::Range<usize> {
-        self.bounds(0)
+        self.capture(0)
     }
 
-    pub fn bounds(&self, i: usize) -> ops::Range<usize> {
+    pub fn capture(&self, i: usize) -> ops::Range<usize> {
         ops::Range{
             start: self.matches[i].start as usize,
             end: self.matches[i].end as usize
@@ -96,7 +95,7 @@ impl <'a> LuaPattern<'a> {
     pub fn first_match<'b>(&mut self, text: &'b str) -> Option<&'b str> {
         self.matches(text);
         if self.n_match > 0 {
-            Some(&text[self.bounds(if self.n_match > 1 {1} else {0})])
+            Some(&text[self.capture(if self.n_match > 1 {1} else {0})])
         } else {
             None
         }
@@ -112,7 +111,7 @@ impl <'a> LuaPattern<'a> {
         let mut res = String::new();
         while self.matches(slice) {
             // full range of match
-            let all = self.bounds(0);
+            let all = self.range();
             let captures = Captures{m: self, text: slice};
             let repl = lookup(captures);
             // append everything up to match
@@ -133,7 +132,7 @@ pub struct Captures<'a,'b> {
 
 impl <'a,'b> Captures<'a,'b> {
     pub fn get(&self, i: usize) -> &'b str {
-        &self.text[self.m.bounds(i)]
+        &self.text[self.m.capture(i)]
     }
 
     pub fn num_matches(&self) -> usize {
@@ -184,7 +183,7 @@ impl <'a,'b>Iterator for GMatch<'a,'b> {
             None
         } else {
             let first = if self.m.n_match > 1 {1} else {0};
-            let slice = &self.text[self.m.bounds(first)];
+            let slice = &self.text[self.m.capture(first)];
             self.text = &self.text[self.m.range().end..];
             Some(slice)
         }
@@ -200,32 +199,32 @@ mod tests {
     #[test]
     fn captures_and_matching() {
         let mut m = LuaPattern::new("(one).+");
-        assert_eq!(m.captures(" one two"),&["one two","one"]);
+        assert_eq!(m.captures(" one two"), &["one two","one"]);
         let empty: &[&str] = &[];
-        assert_eq!(m.captures("four"),empty);
+        assert_eq!(m.captures("four"), empty);
 
-        assert_eq!(m.matches("one dog"),true);
-        assert_eq!(m.matches("dog one "),true);
-        assert_eq!(m.matches("dog one"),false);
+        assert_eq!(m.matches("one dog"), true);
+        assert_eq!(m.matches("dog one "), true);
+        assert_eq!(m.matches("dog one"), false);
 
         let text = "one dog";
         let mut m = LuaPattern::new("^(%a+)");
-        assert_eq!(m.matches(text),true);
-        assert_eq!(&text[m.bounds(1)], "one");
-        assert_eq!(m.matches(" one dog"),false);
+        assert_eq!(m.matches(text), true);
+        assert_eq!(&text[m.capture(1)], "one");
+        assert_eq!(m.matches(" one dog"), false);
 
         // captures without allocation
         let captures = m.match_captures(text);
-        assert_eq!(captures.get(0),"one");
-        assert_eq!(captures.get(1),"one");
+        assert_eq!(captures.get(0), "one");
+        assert_eq!(captures.get(1), "one");
 
         let mut m = LuaPattern::new("(%S+)%s*=%s*(.+)");
 
         //  captures as Vec
         let cc = m.captures(" hello= bonzo dog");
         assert_eq!(cc[0], "hello= bonzo dog");
-        assert_eq!(cc[1],"hello");
-        assert_eq!(cc[2],"bonzo dog");
+        assert_eq!(cc[1], "hello");
+        assert_eq!(cc[2], "bonzo dog");
 
         // captures as iterator
         let mut iter = m.match_captures(" frodo = baggins").into_iter();
@@ -233,8 +232,6 @@ mod tests {
         assert_eq!(iter.next(), Some("frodo"));
         assert_eq!(iter.next(), Some("baggins"));
         assert_eq!(iter.next(), None);
-
-
 
     }
 
@@ -258,12 +255,24 @@ mod tests {
 
     #[test]
     fn gsub() {
+        use std::collections::HashMap;
+        
         let mut m = LuaPattern::new("%$(%S+)");
         let res = m.gsub("hello $dolly you're so $fine!",
             |cc| cc.get(1).to_uppercase()
         );
         assert_eq!(res,"hello DOLLY you're so FINE!");
-
-
+        
+        let mut map = HashMap::new();
+        map.insert("dolly", "baby");
+        map.insert("fine", "cool");
+        map.insert("good-looking", "pretty");
+        
+        let mut m = LuaPattern::new("%$%((.-)%)");
+        let res = m.gsub("hello $(dolly) you're so $(fine) and $(good-looking)",
+            |cc| map.get(cc.get(1)).unwrap_or(&"?").to_string()
+        );
+        assert_eq!(res,"hello baby you're so cool and pretty");
+        
     }
 }

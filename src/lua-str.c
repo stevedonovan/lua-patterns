@@ -14,11 +14,6 @@ typedef struct LuaMatch {
 } LuaMatch;
 
 
-// not thread safe (yet)
-static jmp_buf s_jmp_buf;
-static char s_msg_buff[256];
-
-
 /* macro to `unsign' a character */
 #define uchar(c)	((unsigned char)(c))
 
@@ -47,6 +42,8 @@ typedef struct MatchState {
     const char *init;
     ptrdiff_t len;
   } capture[LUA_MAXCAPTURES];
+  jmp_buf jump_buf;
+  char msg_buff[256];  
 } MatchState;
 
 /* recursive function */
@@ -55,21 +52,19 @@ static const char *match (MatchState *ms, const char *s, const char *p);
 #define L_ESC		'%'
 #define SPECIALS	"^$*+?.([%-"
 
-// error handling, hm?? NB
-
-static int throw_error(const char *fmt,...) {
+static int throw_error(MatchState *ms, const char *fmt,...) {
     va_list ap;
     va_start(ap,fmt);
-    vsnprintf(s_msg_buff,sizeof(s_msg_buff),fmt,ap);
+    vsnprintf(ms->msg_buff,sizeof(ms->msg_buff),fmt,ap);
     va_end(ap);
-    longjmp(s_jmp_buf,1);
+    longjmp(ms->jump_buf,1);
     return 0;
 }
 
 static int check_capture (MatchState *ms, int l) {
   l -= '1';
   if (l < 0 || l >= ms->level || ms->capture[l].len == CAP_UNFINISHED)
-    return throw_error("invalid capture index %%%d", l + 1);
+    return throw_error(ms,"invalid capture index %%%d", l + 1);
   return l;
 }
 
@@ -77,7 +72,7 @@ static int capture_to_close (MatchState *ms) {
   int level = ms->level;
   for (level--; level>=0; level--)
     if (ms->capture[level].len == CAP_UNFINISHED) return level;
-  return throw_error("invalid pattern capture");
+  return throw_error(ms,"invalid pattern capture");
 }
 
 
@@ -86,14 +81,14 @@ static const char *classend (MatchState *ms, const char *p) {
   switch (*p++) {
     case L_ESC: {
       if (p == ms->p_end)
-        throw_error("malformed pattern (ends with '%')");
+        throw_error(ms,"malformed pattern (ends with '%')");
       return p+1;
     }
     case '[': {
       if (*p == '^') p++;
       do {  /* look for a `]' */
         if (p == ms->p_end)
-          throw_error("malformed pattern (missing ']')");
+          throw_error(ms,"malformed pattern (missing ']')");
         if (*(p++) == L_ESC && p < ms->p_end)
           p++;  /* skip escapes (e.g. `%]') */
       } while (*p != ']');
@@ -168,7 +163,7 @@ static int singlematch (MatchState *ms, const char *s, const char *p,
 static const char *matchbalance (MatchState *ms, const char *s,
                                    const char *p) {
   if (p >= ms->p_end - 1)
-    throw_error("malformed pattern "
+    throw_error(ms,"malformed pattern "
                       "(missing arguments to  '%b')");
   if (*s != *p) return NULL;
   else {
@@ -218,7 +213,7 @@ static const char *start_capture (MatchState *ms, const char *s,
                                     const char *p, int what) {
   const char *res;
   int level = ms->level;
-  if (level >= LUA_MAXCAPTURES) throw_error("too many captures");
+  if (level >= LUA_MAXCAPTURES) throw_error(ms,"too many captures");
   ms->capture[level].init = s;
   ms->capture[level].len = what;
   ms->level = level+1;
@@ -251,7 +246,7 @@ static const char *match_capture (MatchState *ms, const char *s, int l) {
 
 static const char *match (MatchState *ms, const char *s, const char *p) {
   if (ms->matchdepth-- == 0)
-    throw_error("pattern too complex");
+    throw_error(ms,"pattern too complex");
   init: /* using goto's to optimize tail recursion */
   if (p != ms->p_end) {  /* end of pattern? */
     switch (*p) {
@@ -285,7 +280,7 @@ static const char *match (MatchState *ms, const char *s, const char *p) {
             const char *ep; char previous;
             p += 2;
             if (*p != '[')
-              throw_error("missing '[' after '%f' in pattern");
+              throw_error(ms,"missing '[' after '%f' in pattern");
             ep = classend(ms, p);  /* points to what is next */
             previous = (s == ms->src_init) ? '\0' : *(s - 1);
             if (!matchbracketclass(uchar(previous), p, ep - 1) &&
@@ -357,14 +352,13 @@ static void push_onecapture (MatchState *ms, int i, const char *s,
   if (i >= ms->level) {
     if (i == 0)  { /* ms->level == 0, too */
       mm->start = 0;
-      mm->end = e - s ;
-      //lua_pushlstring(ms->L, s, e - s);  /* add whole match */
+      mm->end = e - s;
     } else
-      throw_error("invalid capture index");
+      throw_error(ms,"invalid capture index");
   }
   else {
     ptrdiff_t l = ms->capture[i].len;
-    if (l == CAP_UNFINISHED) throw_error("unfinished capture");
+    if (l == CAP_UNFINISHED) throw_error(ms,"unfinished capture");
     if (l == CAP_POSITION) {
       mm[i].start = ms->capture[i].init - ms->src_init + 1;
       mm[i].end = mm[i].start;
@@ -384,7 +378,6 @@ static int push_captures (MatchState *ms, const char *s, const char *e, LuaMatch
   return nlevels;  /* number of strings pushed */
 }
 
-
 int str_match (const char *s, unsigned int ls, const char *p, unsigned int lp, char **err_msg, LuaMatch *mm) {
   const char *s1 = s;
   MatchState ms;
@@ -392,9 +385,13 @@ int str_match (const char *s, unsigned int ls, const char *p, unsigned int lp, c
   if (anchor) {
     p++; lp--;  /* skip anchor character */
   }
+  
+  memset(ms.msg_buff,0,sizeof(ms.msg_buff));
 
-  if (setjmp(s_jmp_buf) != 0) {
-    if (err_msg != NULL) *err_msg = s_msg_buff;
+  if (setjmp(ms.jump_buf) != 0) {
+    if (err_msg != NULL) {
+        *err_msg = strdup(ms.msg_buff);
+    }
     return 0;
   }
 
