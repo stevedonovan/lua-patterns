@@ -49,4 +49,114 @@ Lua patterns (like regexps) are not anchored by default, so this finds
 the first match and works from there. The 0 capture always exists
 (the full match) and here the 1 capture just picks up the first word.
 
+> There is an obvious limitation: "%a" refers specifically to a single byte
+> representing a letter according to the C locale. Lua people will often
+> look for 'sequence of non-spaces' ("%S+"), etc - that is, identify maybe-UTF-8
+> sequences using surronding punctionation or spaces.
+
+If you want your captures as strings, then there are several options. Grab them
+as a vector (it will be empty if the match fails.)
+
+```rust
+let v = m.captures(text);
+assert_eq!(v, &["hello one","hello"]);
+```
+This will create a vector - you can avoid excessive allocations with `capture_into`:
+
+```rust
+let mut v = Vec::new();
+if m.capture_into(text,&mut v) {
+    assert_eq!(v, &["hello one","hello"]);
+}
+```
+Imagine that this is happening in a loop - the vector is only allocated the first
+time it is filled, and thereafter there are no allocations. It's a convenient
+method if you are checking text against several patterns, and is actually
+more ergonomic than using Lua's `string.match`.  (Personally I prefer
+to use those marvelous things called "if statements" rather than elaborate
+regular expressions.)
+
+The `gmatch` method creates an interator over all matches.
+
+```rust
+let mut m = lp::LuaPattern::new("%S+");
+let split: Vec<_> = m.gmatch("dog  cat leopard wolf  ").collect();
+assert_eq!(split,&["dog","cat","leopard","wolf"]);
+```
+A single match is returned; if the pattern has no captures, you get the full match,
+otherwise you get the first match. So "(%S+)" would give you the same result.
+
+Text substitution is an old favourite of mine, so here's `gsub`:
+
+```rust
+let mut m = lp::LuaPattern::new("%$(%S+)");
+let res = m.gsub("hello $dolly you're so $fine",
+    |cc| cc.get(1).to_uppercase()
+);
+assert_eq!(res,"hello DOLLY you're so FINE");
+```
+The closure is passed a `Closures` object and the captures are accessed
+using the `get` method; it returns a `String`.
+
+In Lua, `string.gsub` has three forms:
+
+ - using a closure, like here
+ - using a replacement string referencing closures, like "%1-%2"
+ - using a table - i.e. a map
+
+The first is more general, and the other cases can be implemented in
+a straightforward way using it (although I am thinking of implementing
+the second case as a convenient shortcut.)  For maps, you usually
+want to handle the 'not found' case in some special way:
+
+```rust
+let mut map = HashMap::new();
+// updating old lines for the 21st Century
+map.insert("dolly", "baby");
+map.insert("fine", "cool");
+map.insert("good-looking", "pretty");
+
+let mut m = LuaPattern::new("%$%((.-)%)");
+let res = m.gsub("hello $(dolly) you're so $(fine) and $(good-looking)",
+    |cc| map.get(cc.get(1)).unwrap_or(&"?").to_string()
+);
+assert_eq!(res,"hello baby you're so cool and pretty");
+```
+
+(The ".-" pattern means 'match as little as possible' - often called 'lazy'
+matching.)
+
+For the replacement case, this is equivalent to a replace string "%1:'%2'":
+
+```rust
+let mut m = lp::LuaPattern::new("(%S+)%s*=%s*([^;]+);");
+let res = m.gsub("alpha=bonzo; beta=felix;",
+    |cc| format!("{}:'{}',", cc.get(1), cc.get(2))
+);
+assert_eq!(res, "alpha:'bonzo', beta:'felix',");
+```
+Having a byte-oriented pattern matcher can be useful. For instance, this
+is basically the old `strings` utility - we read all of a 'binary' file into
+a vector of bytes, and then use `gmatch_bytes` to iterate over all `&[u8]`
+matches corresponding to two or more adjacent ASCII letters:
+
+```rust
+let mut words = LuaPattern::new("%a%a+");
+for w in words.gmatch_bytes(&buf) {
+    println!("{}",std::str::from_utf8(w).unwrap());
+}
+```
+
+The pattern itself may be arbitrary bytes - Lua 'string' matching does
+not care about embedded nul bytes:
+
+```rust
+let patt = &[0xDE,0x00,b'+',0xBE];
+let bytes = &[0xFF,0xEE,0x0,0xDE,0x0,0x0,0xBE,0x0,0x0];
+
+let mut m = LuaPattern::from_bytes(patt);
+assert!(m.matches_bytes(bytes));
+assert_eq!(&bytes[m.capture(0)], &[0xDE,0x00,0x00,0xBE]);
+```
+
 
