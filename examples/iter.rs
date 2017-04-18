@@ -4,9 +4,9 @@ extern crate lua_patterns as lp;
 
 fn main() {
 
-    let mut m = lp::LuaPattern::new("hello%");
-    m.matches("hello");
-    println!("ok");
+    //~ let mut m = lp::LuaPattern::new("hello%");
+    //~ m.matches("hello");
+    //~ println!("ok");
 
     ///*
     let mut m = lp::LuaPattern::new("(%a+)");
@@ -16,8 +16,8 @@ fn main() {
     assert_eq!(iter.next(), Some("three"));
     assert_eq!(iter.next(), None);
 
-    let mut m = lp::LuaPattern::new("(%a+)");
-    let split: Vec<_> = m.gmatch("dog cat leopard wolf").collect();
+    let mut m = lp::LuaPattern::new("%S+");
+    let split: Vec<_> = m.gmatch("dog  cat leopard wolf").collect();
     assert_eq!(split,&["dog","cat","leopard","wolf"]);
 
     let mut m = lp::LuaPattern::new("(%S+)%s*=%s*(.+)");
@@ -37,8 +37,12 @@ fn main() {
         |cc| cc.get(1).to_uppercase()
     );
     assert_eq!(res,"hello DOLLY you're so FINE");
-    //*/
 
+    let mut m = lp::LuaPattern::new("(%S+)%s*=%s*([^;]+);");
+    let res = m.gsub("alpha=bonzo; beta=felix;",
+        |cc| format!("{}:'{}',", cc.get(1), cc.get(2))
+    );
+    assert_eq!(res, "alpha:'bonzo', beta:'felix',");
 
 
 
