@@ -4,7 +4,6 @@ use std::os::raw::{c_int,c_char,c_uint};
 use std::ffi::CStr;
 
 #[repr(C)]
-#[derive(PartialEq,Eq,Debug)]
 struct LuaMatch {
     start: c_int,
     end: c_int
@@ -21,6 +20,7 @@ extern {
         ) -> c_int;
 }
 
+/// Represents a Lua string pattern and the results of a match
 pub struct LuaPattern<'a> {
     patt: &'a [u8],
     matches: Vec<LuaMatch>,
@@ -28,16 +28,19 @@ pub struct LuaPattern<'a> {
 }
 
 impl <'a> LuaPattern<'a> {
+    /// Create a new Lua pattern from a string
     pub fn new(patt: &'a str) -> LuaPattern<'a> {
         LuaPattern::from_bytes(patt.as_bytes())
     }
 
+    /// Create a new Lua pattern from a slice of bytes
     pub fn from_bytes (bytes: &'a [u8]) -> LuaPattern<'a> {
         let mut matches: Vec<LuaMatch> = Vec::with_capacity(LUA_MAXCAPTURES);
         unsafe {matches.set_len(LUA_MAXCAPTURES);}
         LuaPattern{patt: bytes, matches: matches, n_match: 0}
     }
 
+    /// Match a slice of bytes with a pattern
     pub fn matches_bytes(&mut self, s: &[u8]) -> bool {
         let c_ptr: *mut c_char = ptr::null_mut();
         let pvoid = Box::into_raw(Box::new(c_ptr));
@@ -56,22 +59,26 @@ impl <'a> LuaPattern<'a> {
         self.n_match > 0
     }
 
+    /// Match a string with a pattern
     pub fn matches(&mut self, text: &str) -> bool {
         self.matches_bytes(text.as_bytes())
     }
 
 
+    /// Collect all captures of this match as a vector of strings.
     pub fn captures<'b>(&mut self, text: &'b str) -> Vec<&'b str> {
         let mut res = Vec::new();
         self.capture_into(text, &mut res);
         res
     }
 
+
     pub fn match_captures<'b>(&'a mut self, text: &'b str) -> Captures<'a,'b> {
         self.matches(text);
         Captures {m: self, text: text}
     }
 
+    /// Collect all captures of this match into the provided vector.
     pub fn capture_into<'b>(&mut self, text: &'b str, vec: &mut Vec<&'b str>) -> bool {
         self.matches(text);
         vec.clear();
@@ -81,10 +88,12 @@ impl <'a> LuaPattern<'a> {
         self.n_match > 0
     }
 
+    /// The full match (same as `capture(0)`)
     pub fn range(&self) -> ops::Range<usize> {
         self.capture(0)
     }
 
+    /// Get the nth capture of the match.
     pub fn capture(&self, i: usize) -> ops::Range<usize> {
         ops::Range{
             start: self.matches[i].start as usize,
@@ -101,10 +110,19 @@ impl <'a> LuaPattern<'a> {
         }
     }
 
+    /// An iterator over all matches in a string.
     pub fn gmatch<'b>(&'a mut self, text: &'b str) -> GMatch<'a,'b> {
         GMatch{m: self, text: text}
     }
 
+    /// An iterator over all matches in a slice of bytes.
+    pub fn gmatch_bytes<'b>(&'a mut self, bytes: &'b [u8]) -> GMatchBytes<'a,'b> {
+        GMatchBytes{m: self, bytes: bytes}
+    }
+
+
+    /// Globally substitute ('gsub') all matches with a replacement
+    /// string.
     pub fn gsub <F> (&mut self, text: &str, lookup: F) -> String
     where F: Fn(Captures)-> String {
         let mut slice = text;
@@ -122,24 +140,27 @@ impl <'a> LuaPattern<'a> {
         res.push_str(slice);
         res
     }
-
 }
 
+/// Low-overhead convenient access to match captures
 pub struct Captures<'a,'b> {
     m: &'a LuaPattern<'a>,
     text: &'b str
 }
 
 impl <'a,'b> Captures<'a,'b> {
+    /// get the capture as a string slice
     pub fn get(&self, i: usize) -> &'b str {
         &self.text[self.m.capture(i)]
     }
 
+    /// number of matches
     pub fn num_matches(&self) -> usize {
         self.m.n_match
     }
 }
 
+/// Iterator over all captures
 pub struct CaptureIter<'a,'b> {
     cc: Captures<'a,'b>,
     idx: usize,
@@ -170,6 +191,7 @@ impl <'a,'b> IntoIterator for Captures<'a,'b> {
 }
 
 
+/// Iterator for gmatch
 pub struct GMatch<'a,'b> {
     m: &'a mut LuaPattern<'a>,
     text: &'b str
@@ -185,6 +207,28 @@ impl <'a,'b>Iterator for GMatch<'a,'b> {
             let first = if self.m.n_match > 1 {1} else {0};
             let slice = &self.text[self.m.capture(first)];
             self.text = &self.text[self.m.range().end..];
+            Some(slice)
+        }
+    }
+
+}
+
+/// Iterator for gmatch_bytes
+pub struct GMatchBytes<'a,'b> {
+    m: &'a mut LuaPattern<'a>,
+    bytes: &'b [u8]
+}
+
+impl <'a,'b>Iterator for GMatchBytes<'a,'b> {
+    type Item = &'b [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if ! self.m.matches_bytes(self.bytes) {
+            None
+        } else {
+            let first = if self.m.n_match > 1 {1} else {0};
+            let slice = &self.bytes[self.m.capture(first)];
+            self.bytes = &self.bytes[self.m.range().end..];
             Some(slice)
         }
     }
@@ -256,23 +300,23 @@ mod tests {
     #[test]
     fn gsub() {
         use std::collections::HashMap;
-        
+
         let mut m = LuaPattern::new("%$(%S+)");
         let res = m.gsub("hello $dolly you're so $fine!",
             |cc| cc.get(1).to_uppercase()
         );
         assert_eq!(res,"hello DOLLY you're so FINE!");
-        
+
         let mut map = HashMap::new();
         map.insert("dolly", "baby");
         map.insert("fine", "cool");
         map.insert("good-looking", "pretty");
-        
+
         let mut m = LuaPattern::new("%$%((.-)%)");
         let res = m.gsub("hello $(dolly) you're so $(fine) and $(good-looking)",
             |cc| map.get(cc.get(1)).unwrap_or(&"?").to_string()
         );
         assert_eq!(res,"hello baby you're so cool and pretty");
-        
+
     }
 }
