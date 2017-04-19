@@ -1,3 +1,44 @@
+//! This is a Rust binding to [Lua string patterns](https://www.lua.org/pil/20.2.html),
+//! using the original code from Lua 5.2.
+//!
+//! Although not regular expressions (they lack alternation) they are a powerful
+//! and lightweight way to process text. Please note that they are not
+//! UTF-8-aware, and in fact can process arbitrary binary data.
+//!
+//! `LuaPattern` can be created from a string _or_ a byte slice, and has
+//! methods which are similar to the original Lua API. Please see
+//! [the README](https://github.com/stevedonovan/lua-patterns/blob/master/readme.md)
+//! for more discussion.
+//!
+//! ## Examples
+//!
+//! ```rust
+//! extern crate lua_patterns;
+//! let mut m = lua_patterns::LuaPattern::new("one");
+//! let text = "hello one two";
+//! assert!(m.matches(text));
+//! let r = m.range();
+//! assert_eq!(r.start, 6);
+//! assert_eq!(r.end, 9);
+//! ```
+//!
+//! Collecting captures from a match:
+//!
+//! ```rust
+//! extern crate lua_patterns;
+//! let text = "  hello one";
+//! let mut m = lua_patterns::LuaPattern::new("(%S+) one");
+//!
+//! // allocates a vector of captures
+//! let v = m.captures(text);
+//! assert_eq!(v, &["hello one","hello"]);
+//! let mut v = Vec::new();
+//! // writes captures into preallocated vector
+//! if m.capture_into(text,&mut v) {
+//!     assert_eq!(v, &["hello one","hello"]);
+//! }
+//! ```
+
 use std::ptr;
 use std::ops;
 use std::os::raw::{c_int,c_char,c_uint};
@@ -41,6 +82,14 @@ impl <'a> LuaPattern<'a> {
     }
 
     /// Match a slice of bytes with a pattern
+    ///
+    /// ```
+    /// let patt = &[0xFE,0xEE,b'+',0xED];
+    /// let mut m = lua_patterns::LuaPattern::from_bytes(patt);
+    /// let bytes = &[0x00,0x01,0xFE,0xEE,0xEE,0xED,0xEF];
+    /// assert!(m.matches_bytes(bytes));
+    /// assert_eq!(&bytes[m.range()], &[0xFE,0xEE,0xEE,0xED]);
+    /// ```
     pub fn matches_bytes(&mut self, s: &[u8]) -> bool {
         let c_ptr: *mut c_char = ptr::null_mut();
         let pvoid = Box::into_raw(Box::new(c_ptr));
@@ -60,25 +109,53 @@ impl <'a> LuaPattern<'a> {
     }
 
     /// Match a string with a pattern
+    ///
+    /// ```
+    /// let mut m = lua_patterns::LuaPattern::new("(%a+) one");
+    /// let text = " hello one two";
+    /// assert!(m.matches(text));
+    /// ```
     pub fn matches(&mut self, text: &str) -> bool {
         self.matches_bytes(text.as_bytes())
     }
 
-
-    /// Collect all captures of this match as a vector of strings.
+    /// Match and collect all captures as a vector of string slices
+    ///
+    /// ```
+    /// let mut m = lua_patterns::LuaPattern::new("(one).+");
+    /// assert_eq!(m.captures(" one two"), &["one two","one"]);
+    /// ```
     pub fn captures<'b>(&mut self, text: &'b str) -> Vec<&'b str> {
         let mut res = Vec::new();
         self.capture_into(text, &mut res);
         res
     }
 
-
+    /// A convenient way to access the captures with no allocation
+    ///
+    /// ```rust
+    /// let text = "  hello one";
+    /// let mut m = lua_patterns::LuaPattern::new("(%S+) one");
+    /// if m.matches(text) {
+    ///     let cc = m.match_captures(text);
+    ///     assert_eq!(cc.get(0), "hello one");
+    ///     assert_eq!(cc.get(1), "hello");
+    /// }
+    /// ```
     pub fn match_captures<'b>(&'a mut self, text: &'b str) -> Captures<'a,'b> {
-        self.matches(text);
         Captures {m: self, text: text}
     }
 
-    /// Collect all captures of this match into the provided vector.
+    /// Match and collect all captures into the provided vector.
+    ///
+    /// ```rust
+    /// let text = "  hello one";
+    /// let mut m = lua_patterns::LuaPattern::new("(%S+) one");
+    /// let mut v = Vec::new();
+    /// if m.capture_into(text,&mut v) {
+    ///     assert_eq!(v, &["hello one","hello"]);
+    /// }
+    /// ```
     pub fn capture_into<'b>(&mut self, text: &'b str, vec: &mut Vec<&'b str>) -> bool {
         self.matches(text);
         vec.clear();
@@ -94,6 +171,14 @@ impl <'a> LuaPattern<'a> {
     }
 
     /// Get the nth capture of the match.
+    ///
+    /// ```
+    /// let mut m = lua_patterns::LuaPattern::new("(%a+) one");
+    /// let text = " hello one two";
+    /// assert!(m.matches(text));
+    /// assert_eq!(m.capture(0),1..10);
+    /// assert_eq!(m.capture(1),1..6);
+    /// ```
     pub fn capture(&self, i: usize) -> ops::Range<usize> {
         ops::Range{
             start: self.matches[i].start as usize,
@@ -101,48 +186,160 @@ impl <'a> LuaPattern<'a> {
         }
     }
 
-    pub fn first_match<'b>(&mut self, text: &'b str) -> Option<&'b str> {
-        self.matches(text);
-        if self.n_match > 0 {
-            Some(&text[self.capture(if self.n_match > 1 {1} else {0})])
-        } else {
-            None
-        }
-    }
-
     /// An iterator over all matches in a string.
+    ///
+    /// The matches are returned as string slices; if there are no
+    /// captures the full match is used, otherwise the first capture.
+    /// That is, this example will also work with the pattern "(%S+)".
+    ///
+    /// ```
+    /// let mut m = lua_patterns::LuaPattern::new("%S+");
+    /// let split: Vec<_> = m.gmatch("dog  cat leopard wolf").collect();
+    /// assert_eq!(split,&["dog","cat","leopard","wolf"]);
+    /// ```
     pub fn gmatch<'b>(&'a mut self, text: &'b str) -> GMatch<'a,'b> {
         GMatch{m: self, text: text}
     }
 
     /// An iterator over all matches in a slice of bytes.
+    ///
+    /// ```
+    /// let bytes = &[0xAA,0x01,0x01,0x03,0xBB,0x01,0x01,0x01];
+    /// let patt = &[0x01,b'+'];
+    /// let mut m = lua_patterns::LuaPattern::from_bytes(patt);
+    /// let mut iter = m.gmatch_bytes(bytes);
+    /// assert_eq!(iter.next().unwrap(), &[0x01,0x01]);
+    /// assert_eq!(iter.next().unwrap(), &[0x01,0x01,0x01]);
+    /// assert_eq!(iter.next(), None);
+    /// ```
     pub fn gmatch_bytes<'b>(&'a mut self, bytes: &'b [u8]) -> GMatchBytes<'a,'b> {
         GMatchBytes{m: self, bytes: bytes}
     }
 
-
-    /// Globally substitute ('gsub') all matches with a replacement
-    /// string.
-    pub fn gsub <F> (&mut self, text: &str, lookup: F) -> String
+    /// Globally substitute all matches with a replacement
+    /// provided by a function of the captures.
+    ///
+    /// ```
+    /// let mut m = lua_patterns::LuaPattern::new("%$(%S+)");
+    /// let res = m.gsub_with("hello $dolly you're so $fine!",
+    ///     |cc| cc.get(1).to_uppercase()
+    /// );
+    /// assert_eq!(res, "hello DOLLY you're so FINE!");
+    /// ```
+    pub fn gsub_with <F> (&mut self, text: &str, lookup: F) -> String
     where F: Fn(Captures)-> String {
         let mut slice = text;
         let mut res = String::new();
         while self.matches(slice) {
             // full range of match
             let all = self.range();
-            let captures = Captures{m: self, text: slice};
-            let repl = lookup(captures);
             // append everything up to match
             res.push_str(&slice[0..all.start]);
+            let captures = Captures{m: self, text: slice};
+            let repl = lookup(captures);
             res.push_str(&repl);
             slice = &slice[all.end..];
         }
         res.push_str(slice);
         res
     }
+
+    /// Globally substitute all matches with a replacement string
+    ///
+    /// This string _may_ have capture references ("%0",..). Use "%%"
+    /// to represent "%". Plain strings like "" work just fine ;)
+    ///
+    /// ```
+    /// let mut m = lua_patterns::LuaPattern::new("(%S+)%s*=%s*(%S+);%s*");
+    /// let res = m.gsub("a=2; b=3; c = 4;", "'%2':%1 ");
+    /// assert_eq!(res,"'2':a '3':b '4':c ");
+    /// ```
+    pub fn gsub (&mut self, text: &str, repl: &str) -> String {
+        let repl = generate_gsub_patterns(repl);
+        let mut slice = text;
+        let mut res = String::new();
+        while self.matches(slice) {
+            let all = self.range();
+            res.push_str(&slice[0..all.start]);
+            let captures = Captures{m: self, text: slice};
+            for r in &repl {
+                match *r {
+                    Subst::Text(ref s) => res.push_str(&s),
+                    Subst::Capture(i) => res.push_str(captures.get(i))
+                }
+            }
+            slice = &slice[all.end..];
+        }
+        res.push_str(slice);
+        res
+    }
+
+    /// Globally substitute all _byte_ matches with a replacement
+    /// provided by a function of the captures.
+    ///
+    /// ```
+    /// let bytes = &[0xAA,0x01,0x02,0x03,0xBB];
+    /// let patt = &[0x01,0x02];
+    /// let mut m = lua_patterns::LuaPattern::from_bytes(patt);
+    /// let res = m.gsub_bytes_with(bytes,|cc| vec![0xFF]);
+    /// assert_eq!(res, &[0xAA,0xFF,0x03,0xBB]);
+    /// ```
+    pub fn gsub_bytes_with <F> (&mut self, bytes: &[u8], lookup: F) -> Vec<u8>
+    where F: Fn(ByteCaptures)-> Vec<u8> {
+        let mut slice = bytes;
+        let mut res = Vec::new();
+        while self.matches_bytes(slice) {
+            let all = self.range();
+            let capture = &slice[0..all.start];
+            res.extend_from_slice(capture);
+            let captures = ByteCaptures{m: self, bytes: slice};
+            let repl = lookup(captures);
+            res.extend(repl);
+            slice = &slice[all.end..];
+        }
+        res.extend_from_slice(slice);
+        res
+    }
+
 }
 
-/// Low-overhead convenient access to match captures
+#[derive(Debug)]
+enum Subst {
+    Text(String),
+    Capture(usize)
+}
+
+impl Subst {
+    fn new_text(text: &str) -> Subst {
+        Subst::Text(text.to_string())
+    }
+}
+
+fn generate_gsub_patterns(repl: &str) -> Vec<Subst> {
+    let mut m = LuaPattern::new("%%([%%%d])");
+    let mut res = Vec::new();
+    let mut slice = repl;
+    while m.matches(slice) {
+        let all = m.range();
+        let before = &slice[0..all.start];
+        if before != "" {
+            res.push(Subst::new_text(before));
+        }
+        let capture = &slice[m.capture(1)];
+        if capture == "%" { // escaped literal '%'
+            res.push(Subst::new_text("%"));
+        } else { // has to be a digit
+            let index: usize = capture.parse().unwrap();
+            res.push(Subst::Capture(index));
+        }
+        slice = &slice[all.end..];
+    }
+    res.push(Subst::new_text(slice));
+    res
+}
+
+
+/// Low-overhead convenient access to string match captures
 pub struct Captures<'a,'b> {
     m: &'a LuaPattern<'a>,
     text: &'b str
@@ -160,7 +357,7 @@ impl <'a,'b> Captures<'a,'b> {
     }
 }
 
-/// Iterator over all captures
+/// Iterator over all captures of a match
 pub struct CaptureIter<'a,'b> {
     cc: Captures<'a,'b>,
     idx: usize,
@@ -190,8 +387,25 @@ impl <'a,'b> IntoIterator for Captures<'a,'b> {
     }
 }
 
+/// Low-overhead convenient access to byte match captures
+pub struct ByteCaptures<'a,'b> {
+    m: &'a LuaPattern<'a>,
+    bytes: &'b [u8]
+}
 
-/// Iterator for gmatch
+impl <'a,'b> ByteCaptures<'a,'b> {
+    /// get the capture as a byte slice
+    pub fn get(&self, i: usize) -> &'b [u8] {
+        &self.bytes[self.m.capture(i)]
+    }
+
+    /// number of matches
+    pub fn num_matches(&self) -> usize {
+        self.m.n_match
+    }
+}
+
+/// Iterator for all string slices from `gmatch`
 pub struct GMatch<'a,'b> {
     m: &'a mut LuaPattern<'a>,
     text: &'b str
@@ -213,7 +427,7 @@ impl <'a,'b>Iterator for GMatch<'a,'b> {
 
 }
 
-/// Iterator for gmatch_bytes
+/// Iterator for all byte slices from `gmatch_bytes`
 pub struct GMatchBytes<'a,'b> {
     m: &'a mut LuaPattern<'a>,
     bytes: &'b [u8]
@@ -235,10 +449,101 @@ impl <'a,'b>Iterator for GMatchBytes<'a,'b> {
 
 }
 
+/// Build a byte Lua pattern, optionally escaping 'magic' characters
+pub struct LuaPatternBuilder {
+    bytes: Vec<u8>
+}
+
+impl LuaPatternBuilder {
+    /// Create a new Lua pattern builder
+    pub fn new() -> LuaPatternBuilder {
+        LuaPatternBuilder{bytes: Vec::new()}
+    }
+
+    /// Add unescaped characters from a string
+    ///
+    /// ```
+    /// let patt = lua_patterns::LuaPatternBuilder::new()
+    ///     .text("(boo)")
+    ///     .build();
+    /// assert_eq!(std::str::from_utf8(&patt).unwrap(), "(boo)");
+    /// ```
+    pub fn text(&mut self, s: &str) -> &mut Self {
+        self.bytes.extend_from_slice(s.as_bytes());
+        self
+    }
+
+    /// Add escaped bytes from a slice
+    ///
+    /// ```
+    /// let patt = lua_patterns::LuaPatternBuilder::new()
+    ///     .text("^")
+    ///     .bytes(b"^") // magic character!
+    ///     .build();
+    /// assert_eq!(std::str::from_utf8(&patt).unwrap(), "^%^");
+    /// ```
+    pub fn bytes(&mut self, b: &[u8]) -> &mut Self {
+        let mut m = LuaPattern::new("[%-%.%+%[%]%(%)%$%^%%%?%*]");
+        let bb = m.gsub_bytes_with(b,|cc| {
+            let mut res = Vec::new();
+            res.push(b'%');
+            res.push(cc.get(0)[0]);
+            res
+        });
+        self.bytes.extend(bb);
+        self
+    }
+
+    /// Add escaped bytes from hex string
+    ///
+    /// This consists of adjacent pairs of hex digits.
+    ///
+    /// ```
+    /// let patt = lua_patterns::LuaPatternBuilder::new()
+    ///     .text("^")
+    ///     .bytes_as_hex("5E") // which is ASCII '^'
+    ///     .build();
+    /// assert_eq!(std::str::from_utf8(&patt).unwrap(), "^%^");
+    /// ```
+    pub fn bytes_as_hex(&mut self, bs: &str) -> &mut Self {
+        let bb = LuaPatternBuilder::hex_to_bytes(bs);
+        self.bytes(&bb)
+    }
+
+    /// Create the pattern
+    pub fn build(&mut self) -> Vec<u8> {
+        let mut v = Vec::new();
+        std::mem::swap(&mut self.bytes, &mut v);
+        v
+    }
+
+    /// Utility to create a vector of bytes from a hex string
+    ///
+    /// ```
+    /// let bb = lua_patterns::LuaPatternBuilder::hex_to_bytes("AEFE00FE");
+    /// assert_eq!(bb, &[0xAE,0xFE,0x00,0xFE]);
+    /// ```
+    pub fn hex_to_bytes(s: &str) -> Vec<u8> {
+        let mut m = LuaPattern::new("%x%x");
+        m.gmatch(s).map(|pair| u8::from_str_radix(pair,16).unwrap()).collect()
+    }
+
+    /// Utility to create a hex string from a slice of bytes
+    ///
+    /// ```
+    /// let hex = lua_patterns::LuaPatternBuilder::bytes_to_hex(&[0xAE,0xFE,0x00,0xFE]);
+    /// assert_eq!(hex,"AEFE00FE");
+    ///
+    /// ```
+    pub fn bytes_to_hex(s: &[u8]) -> String {
+        s.iter().map(|b| format!("{:02X}",b)).collect()
+    }
+
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[test]
     fn captures_and_matching() {
@@ -258,6 +563,7 @@ mod tests {
         assert_eq!(m.matches(" one dog"), false);
 
         // captures without allocation
+        m.matches(text);
         let captures = m.match_captures(text);
         assert_eq!(captures.get(0), "one");
         assert_eq!(captures.get(1), "one");
@@ -271,7 +577,9 @@ mod tests {
         assert_eq!(cc[2], "bonzo dog");
 
         // captures as iterator
-        let mut iter = m.match_captures(" frodo = baggins").into_iter();
+        let text = " frodo = baggins";
+        m.matches(text);
+        let mut iter = m.match_captures(text).into_iter();
         assert_eq!(iter.next(), Some("frodo = baggins"));
         assert_eq!(iter.next(), Some("frodo"));
         assert_eq!(iter.next(), Some("baggins"));
@@ -302,10 +610,10 @@ mod tests {
         use std::collections::HashMap;
 
         let mut m = LuaPattern::new("%$(%S+)");
-        let res = m.gsub("hello $dolly you're so $fine!",
+        let res = m.gsub_with("hello $dolly you're so $fine!",
             |cc| cc.get(1).to_uppercase()
         );
-        assert_eq!(res,"hello DOLLY you're so FINE!");
+        assert_eq!(res, "hello DOLLY you're so FINE!");
 
         let mut map = HashMap::new();
         map.insert("dolly", "baby");
@@ -313,10 +621,20 @@ mod tests {
         map.insert("good-looking", "pretty");
 
         let mut m = LuaPattern::new("%$%((.-)%)");
-        let res = m.gsub("hello $(dolly) you're so $(fine) and $(good-looking)",
+        let res = m.gsub_with("hello $(dolly) you're so $(fine) and $(good-looking)",
             |cc| map.get(cc.get(1)).unwrap_or(&"?").to_string()
         );
-        assert_eq!(res,"hello baby you're so cool and pretty");
+        assert_eq!(res, "hello baby you're so cool and pretty");
+
+        let mut m = LuaPattern::new("%s+");
+        let res = m.gsub("hello dolly you're so fine","");
+        assert_eq!(res, "hellodollyyou'resofine");
+
+        let mut m = LuaPattern::new("(%S+)%s*=%s*(%S+);%s*");
+        let res = m.gsub("a=2; b=3; c = 4;", "'%2':%1 ");
+        assert_eq!(res,"'2':a '3':b '4':c ");
+
+
 
     }
 }

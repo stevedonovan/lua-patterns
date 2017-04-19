@@ -1,5 +1,5 @@
 extern crate lua_patterns;
-use lua_patterns::LuaPattern;
+use lua_patterns::{LuaPattern,LuaPatternBuilder};
 
 fn main() {
     let mut m = LuaPattern::new("(%a+) one");
@@ -14,11 +14,25 @@ fn main() {
     let mut v = Vec::new();
     assert!(m.capture_into(text,&mut v));
     assert_eq!(v, &["hello one","hello"]);
+    
+    let bytes = &[0xFF,0xEE,0x0,0xDE,0x24,0x24,0xBE,0x0,0x0];      
 
-    let patt = &[0xDE,0x00,b'+',0xBE];
-    let bytes = &[0xFF,0xEE,0x0,0xDE,0x0,0x0,0xBE,0x0,0x0];
-
-    let mut m = LuaPattern::from_bytes(patt);
+    let patt = LuaPatternBuilder::new()
+        .bytes_as_hex("DE24")
+        .text("+")
+        .bytes(&[0xBE])
+        .build();
+    
+    let mut m = LuaPattern::from_bytes(&patt);
     assert!(m.matches_bytes(bytes));
-    assert_eq!(&bytes[m.capture(0)], &[0xDE,0x00,0x00,0xBE]);
+    assert_eq!(&bytes[m.capture(0)], &[0xDE,0x24,0x24,0xBE]);
+    
+    let mut m = LuaPattern::new("(%S+)%s*=%s*(%S+);%s*");
+    let res = m.gsub("a=2; b=3; c = 4;","'%2':%1 ");
+    println!("{}",res);
+    
+    let mut m = LuaPattern::new("%s+");
+    let res = m.gsub("hello dolly you're so fine","");
+    println!("{}",res);
+    
 }
