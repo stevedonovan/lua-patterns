@@ -15,6 +15,8 @@ This library reuses the original source from Lua 5.2 - only
 [these patterns to C++](https::/github.com/stevedonovan/rx-cpp).
 
 More information can be found on [the Lua wiki](http://lua-users.org/wiki/PatternsTutorial).
+The cool thing is that Lua is a 300KB download, if you want to test patterns out
+without going through Rust.
 
 I've organized the Rust interface much as the original Lua library, 'match',
 'gmatch' and 'gsub', but made these methods of a `LuaPattern` struct. This is
@@ -86,11 +88,11 @@ assert_eq!(split,&["dog","cat","leopard","wolf"]);
 A single match is returned; if the pattern has no captures, you get the full match,
 otherwise you get the first match. So "(%S+)" would give you the same result.
 
-Text substitution is an old favourite of mine, so here's `gsub`:
+Text substitution is an old favourite of mine, so here's `gsub_with`:
 
 ```rust
 let mut m = lp::LuaPattern::new("%$(%S+)");
-let res = m.gsub("hello $dolly you're so $fine",
+let res = m.gsub_with("hello $dolly you're so $fine",
     |cc| cc.get(1).to_uppercase()
 );
 assert_eq!(res,"hello DOLLY you're so FINE");
@@ -98,16 +100,21 @@ assert_eq!(res,"hello DOLLY you're so FINE");
 The closure is passed a `Closures` object and the captures are accessed
 using the `get` method; it returns a `String`.
 
-In Lua, `string.gsub` has three forms:
+The second form of `gsub` is convenient when you have a replacement
+string, which may contain closure references. (To add a literal "%" escape
+it like so "%%")
 
- - using a closure, like here
- - using a replacement string referencing closures, like "%1-%2"
- - using a table - i.e. a map
+```rust
+let mut m = LuaPattern::new("%s+");
+let res = m.gsub("hello dolly you're so fine","");
+assert_eq!(res, "hellodollyyou'resofine");
 
-The first is more general, and the other cases can be implemented in
-a straightforward way using it (although I am thinking of implementing
-the second case as a convenient shortcut.)  For maps, you usually
-want to handle the 'not found' case in some special way:
+let mut m = LuaPattern::new("(%S+)%s*=%s*(%S+);%s*");
+let res = m.gsub("a=2; b=3; c = 4;", "'%2':%1 ");
+assert_eq!(res, "'2':a '3':b '4':c ");
+```        
+The third form of `string.gsub` in Lua does lookup with a table - that is, a map.
+But for maps, you usually want to handle the 'not found' case in some special way:
 
 ```rust
 let mut map = HashMap::new();
@@ -117,7 +124,7 @@ map.insert("fine", "cool");
 map.insert("good-looking", "pretty");
 
 let mut m = LuaPattern::new("%$%((.-)%)");
-let res = m.gsub("hello $(dolly) you're so $(fine) and $(good-looking)",
+let res = m.gsub_with("hello $(dolly) you're so $(fine) and $(good-looking)",
     |cc| map.get(cc.get(1)).unwrap_or(&"?").to_string()
 );
 assert_eq!(res,"hello baby you're so cool and pretty");
@@ -126,11 +133,11 @@ assert_eq!(res,"hello baby you're so cool and pretty");
 (The ".-" pattern means 'match as little as possible' - often called 'lazy'
 matching.)
 
-For the replacement case, this is equivalent to a replace string "%1:'%2'":
+This is equivalent to a replace string "%1:'%2'":
 
 ```rust
 let mut m = lp::LuaPattern::new("(%S+)%s*=%s*([^;]+);");
-let res = m.gsub("alpha=bonzo; beta=felix;",
+let res = m.gsub_with("alpha=bonzo; beta=felix;",
     |cc| format!("{}:'{}',", cc.get(1), cc.get(2))
 );
 assert_eq!(res, "alpha:'bonzo', beta:'felix',");
@@ -146,7 +153,6 @@ for w in words.gmatch_bytes(&buf) {
     println!("{}",std::str::from_utf8(w).unwrap());
 }
 ```
-
 The pattern itself may be arbitrary bytes - Lua 'string' matching does
 not care about embedded nul bytes:
 
@@ -158,5 +164,24 @@ let mut m = LuaPattern::from_bytes(patt);
 assert!(m.matches_bytes(bytes));
 assert_eq!(&bytes[m.capture(0)], &[0xDE,0x00,0x00,0xBE]);
 ```
+The problem here is that it's not obvious when our 'arbitrary' bytes
+include one of the special matching characters like `$` (which is 0x24)
+and so on. Hence there is `LuaPatternBuilder`:
 
+```rust
+let bytes = &[0xFF,0xEE,0x0,0xDE,0x24,0x24,0xBE,0x0,0x0];      
 
+let patt = LuaPatternBuilder::new()
+    .bytes_as_hex("DE24") // less tedious than a byte slice
+    .text("+")  // unescaped
+    .bytes(&[0xBE]) // byte slice
+    .build();
+
+let mut m = LuaPattern::from_bytes(&patt);
+// picks up "DE2424BE"
+```
+
+> **PANICKING** Currently this library will behave badly and panic
+> if the Lua pattern is malformed. There is no compilation step,
+> unlike regexps, but I intend to provide a static validation
+> to convert panics into errors, as good practice demands.
