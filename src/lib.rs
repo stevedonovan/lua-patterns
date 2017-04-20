@@ -119,6 +119,21 @@ impl <'a> LuaPattern<'a> {
         self.matches_bytes(text.as_bytes())
     }
 
+    /// Match a string, returning first capture if successful
+    ///
+    /// ```
+    /// let mut m = lua_patterns::LuaPattern::new("OK%s+(%d+)");
+    /// let res = m.match_maybe("and that's OK 400 to you");
+    /// assert_eq!(res, Some("400"));
+    /// ```
+    pub fn match_maybe<'t>(&mut self, text: &'t str) -> Option<&'t str> {
+        if self.matches(text) {
+            Some(&text[self.first_capture()])
+        } else {
+            None
+        }
+    }
+
     /// Match and collect all captures as a vector of string slices
     ///
     /// ```
@@ -184,6 +199,15 @@ impl <'a> LuaPattern<'a> {
             start: self.matches[i].start as usize,
             end: self.matches[i].end as usize
         }
+    }
+
+    /// Get the 'first' capture of the match
+    ///
+    /// If there are no matches, this is the same as `range`,
+    /// otherwise it's `capture(1)`
+    pub fn first_capture(&self) -> ops::Range<usize> {
+        let idx = if self.n_match > 1 {1} else {0};
+        self.capture(idx)
     }
 
     /// An iterator over all matches in a string.
@@ -418,8 +442,7 @@ impl <'a,'b>Iterator for GMatch<'a,'b> {
         if ! self.m.matches(self.text) {
             None
         } else {
-            let first = if self.m.n_match > 1 {1} else {0};
-            let slice = &self.text[self.m.capture(first)];
+            let slice = &self.text[self.m.first_capture()];
             self.text = &self.text[self.m.range().end..];
             Some(slice)
         }
@@ -440,8 +463,7 @@ impl <'a,'b>Iterator for GMatchBytes<'a,'b> {
         if ! self.m.matches_bytes(self.bytes) {
             None
         } else {
-            let first = if self.m.n_match > 1 {1} else {0};
-            let slice = &self.bytes[self.m.capture(first)];
+            let slice = &self.bytes[self.m.first_capture()];
             self.bytes = &self.bytes[self.m.range().end..];
             Some(slice)
         }
@@ -471,6 +493,33 @@ impl LuaPatternBuilder {
     pub fn text(&mut self, s: &str) -> &mut Self {
         self.bytes.extend_from_slice(s.as_bytes());
         self
+    }
+
+    /// Add unescaped characters from lines
+    ///
+    /// This looks for first non-whitespace run in each line,
+    /// useful for spreading patterns out and commmenting them.
+    /// Works with patterns that use '%s' religiously!
+    ///
+    /// ```
+    /// let patt = lua_patterns::LuaPatternBuilder::new()
+    ///     .text_lines("
+    ///       hello-dolly
+    ///       you-are-fine  # comment
+    ///       cool
+    ///      ")
+    ///     .build();
+    /// assert_eq!(std::str::from_utf8(&patt).unwrap(),
+    ///   "hello-dollyyou-are-finecool");
+    /// ```
+    pub fn text_lines(&mut self, lines: &str) -> &mut Self {
+        let mut text = String::new();
+        for line in lines.lines() {
+            if let Some(first) = line.split_whitespace().next() {
+                text.push_str(first);
+            }
+        }
+        self.text(&text)
     }
 
     /// Add escaped bytes from a slice
