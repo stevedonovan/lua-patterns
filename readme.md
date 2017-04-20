@@ -54,16 +54,25 @@ the first match and works from there. The 0 capture always exists
 > There is an obvious limitation: "%a" refers specifically to a single byte
 > representing a letter according to the C locale. Lua people will often
 > look for 'sequence of non-spaces' ("%S+"), etc - that is, identify maybe-UTF-8
-> sequences using surronding punctionation or spaces.
+> sequences using surronding punctuation or spaces.
 
-If you want your captures as strings, then there are several options. Grab them
-as a vector (it will be empty if the match fails.)
+If you want your captures as strings, then there are several options. If there's
+just one, then `match_maybe` is useful:
 
 ```rust
+let mut m = LuaPattern::new("OK%s+(%d+)");
+let res = m.match_maybe("and that's OK 400 to you");
+assert_eq!(res, Some("400"));
+```
+You can grab them as a vector (it will be empty if the match fails.)
+
+```rust
+let mut m = LuaPattern::new("(%a+) one");
+let text = " hello one two";
 let v = m.captures(text);
 assert_eq!(v, &["hello one","hello"]);
 ```
-This will create a vector - you can avoid excessive allocations with `capture_into`:
+This will create a vector. You can avoid excessive allocations with `capture_into`:
 
 ```rust
 let mut v = Vec::new();
@@ -112,9 +121,9 @@ assert_eq!(res, "hellodollyyou'resofine");
 let mut m = LuaPattern::new("(%S+)%s*=%s*(%S+);%s*");
 let res = m.gsub("a=2; b=3; c = 4;", "'%2':%1 ");
 assert_eq!(res, "'2':a '3':b '4':c ");
-```        
+```
 The third form of `string.gsub` in Lua does lookup with a table - that is, a map.
-But for maps, you usually want to handle the 'not found' case in some special way:
+But for maps you really want to handle the 'not found' case in some special way:
 
 ```rust
 let mut map = HashMap::new();
@@ -169,7 +178,7 @@ include one of the special matching characters like `$` (which is 0x24)
 and so on. Hence there is `LuaPatternBuilder`:
 
 ```rust
-let bytes = &[0xFF,0xEE,0x0,0xDE,0x24,0x24,0xBE,0x0,0x0];      
+let bytes = &[0xFF,0xEE,0x0,0xDE,0x24,0x24,0xBE,0x0,0x0];
 
 let patt = LuaPatternBuilder::new()
     .bytes_as_hex("DE24") // less tedious than a byte slice
