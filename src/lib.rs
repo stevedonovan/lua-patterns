@@ -426,15 +426,17 @@ impl <'a,'b,'c>Iterator for GMatch<'a,'b,'c> {
 
 }
 
-/*
+/* // *** PROBLEM: Unable to resolve 'c properly here
+
 /// Iterator for all captures from `gmatch_captures`
 // lifetimes as for Captures above!
+// 'a is pattern, 'b is text, 'c is ref to LuaPattern
 pub struct GMatchCaptures<'a,'b,'c> where 'a: 'c {
     m: &'c mut LuaPattern<'a>,
     text: &'b str
 }
 
-impl <'a,'b,'c>Iterator for GMatchCaptures<'a,'b,'c> where 'a: 'c {
+impl <'a,'b,'c> Iterator for GMatchCaptures<'a,'b,'c>  where 'a: 'c {
     type Item = Captures<'a,'b,'c>;
 
     fn next(&mut self) -> Option<Self::Item> {
