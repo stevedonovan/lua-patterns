@@ -2,10 +2,14 @@
 name = "lua-patterns"
 version = "0.1.0"
 authors = ["steve donovan <steve.j.donovan@gmail.com>"]
-links = "foo"
+description = "Binding to Lua String Patterns"
 build = "build.rs"
+license = "MIT"
+license-file = "LICENSE.txt"
+repository = "https://github.com/stevedonovan/lua-patterns"
+documentation = "https://docs.rs/lapp/0.1.0/lua-patterns/"
 
-[dependencies]
+keywords = ["string","matching","lua"]
 
 [build-dependencies]
 gcc="0.3"
