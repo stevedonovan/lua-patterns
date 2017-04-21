@@ -26,11 +26,6 @@ fn main() {
     assert_eq!(cc[1],"hello");
     assert_eq!(cc[2],"bonzo dog");
 
-    let captures = m.match_captures(" frodo = baggins");
-    for s in captures {
-        println!("{:?}",s);
-    }
-
     let mut m = lp::LuaPattern::new("%$(%S+)");
     let res = m.gsub_with("hello $dolly you're so $fine",
         |cc| cc.get(1).to_uppercase()

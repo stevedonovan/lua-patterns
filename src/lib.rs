@@ -157,7 +157,7 @@ impl <'a> LuaPattern<'a> {
     ///     assert_eq!(cc.get(1), "hello");
     /// }
     /// ```
-    pub fn match_captures<'b>(&'a mut self, text: &'b str) -> Captures<'a,'b> {
+    pub fn match_captures<'b,'c>(&'c mut self, text: &'b str) -> Captures<'a,'b,'c> {
         Captures {m: self, text: text}
     }
 
@@ -221,7 +221,7 @@ impl <'a> LuaPattern<'a> {
     /// let split: Vec<_> = m.gmatch("dog  cat leopard wolf").collect();
     /// assert_eq!(split,&["dog","cat","leopard","wolf"]);
     /// ```
-    pub fn gmatch<'b>(&'a mut self, text: &'b str) -> GMatch<'a,'b> {
+    pub fn gmatch<'b,'c>(&'c mut self, text: &'b str) -> GMatch<'a,'b,'c> {
         GMatch{m: self, text: text}
     }
 
@@ -364,12 +364,16 @@ fn generate_gsub_patterns(repl: &str) -> Vec<Subst> {
 
 
 /// Low-overhead convenient access to string match captures
-pub struct Captures<'a,'b> {
-    m: &'a LuaPattern<'a>,
+// note: there are three borrows going on here.
+// The lifetime 'a is for the _pattern_, the lifetime 'b is
+// for the _source string_, and 'c is for the reference to LuaPattern
+// And the LuaPattern reference cannot live longer than the pattern reference
+pub struct Captures<'a,'b,'c> where 'a: 'c {
+    m: &'c LuaPattern<'a>,
     text: &'b str
 }
 
-impl <'a,'b> Captures<'a,'b> {
+impl <'a,'b,'c> Captures<'a,'b,'c> {
     /// get the capture as a string slice
     pub fn get(&self, i: usize) -> &'b str {
         &self.text[self.m.capture(i)]
@@ -381,35 +385,6 @@ impl <'a,'b> Captures<'a,'b> {
     }
 }
 
-/// Iterator over all captures of a match
-pub struct CaptureIter<'a,'b> {
-    cc: Captures<'a,'b>,
-    idx: usize,
-    top: usize
-}
-
-impl <'a,'b>Iterator for CaptureIter<'a,'b> {
-    type Item = &'b str;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.idx < self.top {
-            let res = self.cc.get(self.idx);
-            self.idx += 1;
-            Some(res)
-        } else {
-            None
-        }
-    }
-}
-
-impl <'a,'b> IntoIterator for Captures<'a,'b> {
-    type Item = &'b str;
-    type IntoIter = CaptureIter<'a,'b>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        CaptureIter{idx: 0, top: self.num_matches(),cc: self}
-    }
-}
 
 /// Low-overhead convenient access to byte match captures
 pub struct ByteCaptures<'a,'b> {
@@ -430,12 +405,13 @@ impl <'a,'b> ByteCaptures<'a,'b> {
 }
 
 /// Iterator for all string slices from `gmatch`
-pub struct GMatch<'a,'b> {
-    m: &'a mut LuaPattern<'a>,
+// note lifetimes as for Captures above!
+pub struct GMatch<'a,'b,'c> where 'a: 'c {
+    m: &'c mut LuaPattern<'a>,
     text: &'b str
 }
 
-impl <'a,'b>Iterator for GMatch<'a,'b> {
+impl <'a,'b,'c>Iterator for GMatch<'a,'b,'c> {
     type Item = &'b str;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -449,6 +425,30 @@ impl <'a,'b>Iterator for GMatch<'a,'b> {
     }
 
 }
+
+/*
+/// Iterator for all captures from `gmatch_captures`
+// lifetimes as for Captures above!
+pub struct GMatchCaptures<'a,'b,'c> where 'a: 'c {
+    m: &'c mut LuaPattern<'a>,
+    text: &'b str
+}
+
+impl <'a,'b,'c>Iterator for GMatchCaptures<'a,'b,'c> where 'a: 'c {
+    type Item = Captures<'a,'b,'c>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if ! self.m.matches(self.text) {
+            None
+        } else {
+            let split = self.text.split_at(self.m.range().end);
+            self.text = split.1;
+            Some(Captures{m: self.m, text: split.0})
+        }
+    }
+
+}
+// */
 
 /// Iterator for all byte slices from `gmatch_bytes`
 pub struct GMatchBytes<'a,'b> {
@@ -624,15 +624,6 @@ mod tests {
         assert_eq!(cc[0], "hello= bonzo dog");
         assert_eq!(cc[1], "hello");
         assert_eq!(cc[2], "bonzo dog");
-
-        // captures as iterator
-        let text = " frodo = baggins";
-        m.matches(text);
-        let mut iter = m.match_captures(text).into_iter();
-        assert_eq!(iter.next(), Some("frodo = baggins"));
-        assert_eq!(iter.next(), Some("frodo"));
-        assert_eq!(iter.next(), Some("baggins"));
-        assert_eq!(iter.next(), None);
 
     }
 
