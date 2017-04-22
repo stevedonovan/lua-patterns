@@ -5,9 +5,8 @@ authors = ["steve donovan <steve.j.donovan@gmail.com>"]
 description = "Binding to Lua String Patterns"
 build = "build.rs"
 license = "MIT"
-license-file = "LICENSE.txt"
 repository = "https://github.com/stevedonovan/lua-patterns"
-documentation = "https://docs.rs/lapp/0.1.0/lua-patterns/"
+documentation = "https://docs.rs/lua-patterns"
 
 keywords = ["string","matching","lua"]
 
