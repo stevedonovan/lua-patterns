@@ -20,11 +20,15 @@ fn main() {
     let split: Vec<_> = m.gmatch("dog  cat leopard wolf").collect();
     assert_eq!(split,&["dog","cat","leopard","wolf"]);
 
-    let mut m = lp::LuaPattern::new("(%S+)%s*=%s*(.+)");
-    let cc = m.captures(" hello= bonzo dog");
-    assert_eq!(cc[0], "hello= bonzo dog");
+    let mut m = lp::LuaPattern::new("%s*(%S+)%s*=%s*(.-);");
+    let cc = m.captures(" hello= bonzo dog;");
+    assert_eq!(cc[0], " hello= bonzo dog;");
     assert_eq!(cc[1],"hello");
     assert_eq!(cc[2],"bonzo dog");
+
+    for cc in m.gmatch_captures("hello=bonzo dog; bye=cat;") {
+        println!("'{}'='{}'",cc.get(1),cc.get(2));
+    }
 
     let mut m = lp::LuaPattern::new("%$(%S+)");
     let res = m.gsub_with("hello $dolly you're so $fine",

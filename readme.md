@@ -87,7 +87,7 @@ more ergonomic than using Lua's `string.match`.  (Personally I prefer
 to use those marvelous things called "if statements" rather than elaborate
 regular expressions.)
 
-The `gmatch` method creates an interator over all matches.
+The `gmatch` method creates an interator over all matched strings.
 
 ```rust
 let mut m = lp::LuaPattern::new("%S+");
@@ -96,6 +96,19 @@ assert_eq!(split,&["dog","cat","leopard","wolf"]);
 ```
 A single match is returned; if the pattern has no captures, you get the full match,
 otherwise you get the first match. So "(%S+)" would give you the same result.
+
+A more general version is `gmatch_captures` which creates a _streaming_ iterator
+over captures. You have to be a little careful with this one; in particular, you
+will get nonsense if you try to `collect` on the return captures: don't try to
+keep these values.
+It is fine to collect from an expression involving the `get` method however!
+
+```rust
+let mut m = lua_patterns::LuaPattern::new("(%S)%S+");
+let split: Vec<_> = m.gmatch_captures("dog  cat leopard wolf")
+       .map(|cc| cc.get(1)).collect();
+assert_eq!(split,&["d","c","l","w"]);
+```
 
 Text substitution is an old favourite of mine, so here's `gsub_with`:
 

@@ -225,6 +225,22 @@ impl <'a> LuaPattern<'a> {
         GMatch{m: self, text: text}
     }
 
+    /// An iterator over all captures in a string.
+    ///
+    /// The matches are returned as captures; this is a _streaming_
+    /// iterator, so don't try to collect the captures directly; extract
+    /// the string slices using `get`.
+    ///
+    /// ```
+    /// let mut m = lua_patterns::LuaPattern::new("(%S)%S+");
+    /// let split: Vec<_> = m.gmatch_captures("dog  cat leopard wolf")
+    ///       .map(|cc| cc.get(1)).collect();
+    /// assert_eq!(split,&["d","c","l","w"]);
+    /// ```
+    pub fn gmatch_captures<'b,'c>(&'c mut self, text: &'b str) -> GMatchCaptures<'a,'b,'c> {
+        GMatchCaptures{m: self, text: text}
+    }
+
     /// An iterator over all matches in a slice of bytes.
     ///
     /// ```
@@ -426,9 +442,30 @@ impl <'a,'b,'c>Iterator for GMatch<'a,'b,'c> {
 
 }
 
-/* // *** PROBLEM: Unable to resolve 'c properly here
+/// Unsafe version of Captures, needed for gmatch_captures
+// It's unsafe because the lifetime only depends on the original
+// text, not the borrowed matches.
+pub struct CapturesUnsafe<'b>{
+    matches: *const LuaMatch,
+    text: &'b str
+}
 
-/// Iterator for all captures from `gmatch_captures`
+impl <'b> CapturesUnsafe<'b> {
+    /// get the capture as a string slice
+    pub fn get(&self, i: usize) -> &'b str {
+        unsafe {
+            let p = self.matches.offset(i as isize);
+            let range =
+                ops::Range{
+                    start: (*p).start as usize,
+                    end: (*p).end as usize
+                };
+            &self.text[range]
+        }
+    }
+}
+
+/// Streaming iterator for all captures from `gmatch_captures`
 // lifetimes as for Captures above!
 // 'a is pattern, 'b is text, 'c is ref to LuaPattern
 pub struct GMatchCaptures<'a,'b,'c> where 'a: 'c {
@@ -437,7 +474,7 @@ pub struct GMatchCaptures<'a,'b,'c> where 'a: 'c {
 }
 
 impl <'a,'b,'c> Iterator for GMatchCaptures<'a,'b,'c>  where 'a: 'c {
-    type Item = Captures<'a,'b,'c>;
+    type Item = CapturesUnsafe<'b>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if ! self.m.matches(self.text) {
@@ -445,12 +482,12 @@ impl <'a,'b,'c> Iterator for GMatchCaptures<'a,'b,'c>  where 'a: 'c {
         } else {
             let split = self.text.split_at(self.m.range().end);
             self.text = split.1;
-            Some(Captures{m: self.m, text: split.0})
+            let match_ptr: *const LuaMatch = self.m.matches.as_ptr();
+            Some(CapturesUnsafe{matches: match_ptr, text: split.0})
         }
     }
 
 }
-// */
 
 /// Iterator for all byte slices from `gmatch_bytes`
 pub struct GMatchBytes<'a,'b> {
@@ -644,6 +681,13 @@ mod tests {
         assert_eq!(iter.next(), Some("two"));
         assert_eq!(iter.next(), Some("three"));
         assert_eq!(iter.next(), None);
+
+        let mut m = LuaPattern::new("(%a+)");
+        let mut iter = m.gmatch_captures("one two three");
+        assert_eq!(iter.next().unwrap().get(1), "one");
+        assert_eq!(iter.next().unwrap().get(1), "two");
+        assert_eq!(iter.next().unwrap().get(1), "three");
+
 
     }
 
