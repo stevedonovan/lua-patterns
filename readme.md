@@ -37,7 +37,10 @@ assert_eq!(r.start, 6);
 assert_eq!(r.end, 9);
 ```
 This not in itself impressive, since it can be done with the string `find`
-method, but once we start using patterns it gets more exciting, especially
+method. (`new` will panic if you feed it a bad pattern, so use `new_try` if
+you want more control.)
+
+Once we start using patterns it gets more exciting, especially
 with _captures_:
 
 ```rust
@@ -202,8 +205,8 @@ let patt = LuaPatternBuilder::new()
 let mut m = LuaPattern::from_bytes(&patt);
 // picks up "DE2424BE"
 ```
+> Static verification: this version attempts to verify string patterns. If you
+> want errors, use `new_try` and `from_bytes_try`, otherwise the constructors panic.
+> If a match panics after successful verification, it is a __BUG__ - please
+> report the offending pattern.
 
-> **PANICKING** Currently this library will behave badly and panic
-> if the Lua pattern is malformed. There is no compilation step,
-> unlike regexps, but I intend to provide a static validation
-> to convert panics into errors, as good practice demands.

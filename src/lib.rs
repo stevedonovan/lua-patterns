@@ -10,6 +10,8 @@
 //! [the README](https://github.com/stevedonovan/lua-patterns/blob/master/readme.md)
 //! for more discussion.
 //!
+//! [LuaPattern](struct.LuaPattern.html) implements the public API.
+//!
 //! ## Examples
 //!
 //! ```rust
@@ -52,6 +54,24 @@ struct LuaMatch {
 
 static LUA_MAXCAPTURES: usize = 32;
 
+use std::fmt;
+use std::error::Error;
+
+#[derive(Debug,PartialEq)]
+pub struct PatternError(pub String);
+
+impl fmt::Display for PatternError {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f,"{}",self.0)
+	}
+}
+
+impl Error for PatternError {
+	fn description(&self) -> &str {
+		&self.0
+	}
+}
+
 #[link(name = "lua-str", kind="static")]
 extern {
     fn str_match (
@@ -59,6 +79,10 @@ extern {
         err_msg: *mut *mut c_char,
         mm: *mut LuaMatch
         ) -> c_int;
+        
+    fn str_check (
+        p: *const u8, lp: c_uint
+    ) -> *const i8;
 }
 
 /// Represents a Lua string pattern and the results of a match
@@ -69,17 +93,34 @@ pub struct LuaPattern<'a> {
 }
 
 impl <'a> LuaPattern<'a> {
-    /// Create a new Lua pattern from a string
-    pub fn new(patt: &'a str) -> LuaPattern<'a> {
-        LuaPattern::from_bytes(patt.as_bytes())
-    }
-
-    /// Create a new Lua pattern from a slice of bytes
-    pub fn from_bytes (bytes: &'a [u8]) -> LuaPattern<'a> {
+    /// Maybe create a new Lua pattern from a slice of bytes
+    pub fn from_bytes_try (bytes: &'a [u8]) -> Result<LuaPattern<'a>,PatternError> {
         let mut matches: Vec<LuaMatch> = Vec::with_capacity(LUA_MAXCAPTURES);
+        unsafe {
+            let res = str_check(bytes.as_ptr(),bytes.len() as c_uint);
+            if ! res.is_null() {
+                let sres = CStr::from_ptr(res).to_str().unwrap().to_string();
+                return Err(PatternError(sres));
+            }
+        }
         unsafe {matches.set_len(LUA_MAXCAPTURES);}
-        LuaPattern{patt: bytes, matches: matches, n_match: 0}
+        Ok(LuaPattern{patt: bytes, matches: matches, n_match: 0})
     }
+    
+    /// Maybe create a new Lua pattern from a string
+    pub fn new_try(patt: &'a str) -> Result<LuaPattern<'a>,PatternError> {
+        LuaPattern::from_bytes_try(patt.as_bytes())
+    }
+    
+    /// Create a new Lua pattern from a string, panicking if bad
+    pub fn new(patt: &'a str) -> LuaPattern<'a> {
+        LuaPattern::new_try(patt).expect("bad pattern")
+    }    
+    
+    /// Create a new Lua pattern from a slice of bytes, panicking if bad
+    pub fn from_bytes (bytes: &'a [u8]) -> LuaPattern<'a> {
+        LuaPattern::from_bytes_try(bytes).expect("bad pattern")
+    }    
 
     /// Match a slice of bytes with a pattern
     ///
@@ -101,7 +142,7 @@ impl <'a> LuaPattern<'a> {
                 err_msg, self.matches.as_mut_ptr()) as usize;
             let ep = *err_msg;
             if ! ep.is_null() {
-                panic!(format!("lua-pattern {:?}",CStr::from_ptr(ep)));
+                panic!(format!("REPORT AS BUG: lua-pattern {:?}",CStr::from_ptr(ep)));
             }
         }
 
@@ -687,8 +728,6 @@ mod tests {
         assert_eq!(iter.next().unwrap().get(1), "one");
         assert_eq!(iter.next().unwrap().get(1), "two");
         assert_eq!(iter.next().unwrap().get(1), "three");
-
-
     }
 
     #[test]
@@ -719,8 +758,25 @@ mod tests {
         let mut m = LuaPattern::new("(%S+)%s*=%s*(%S+);%s*");
         let res = m.gsub("a=2; b=3; c = 4;", "'%2':%1 ");
         assert_eq!(res,"'2':a '3':b '4':c ");
-
-
-
+    }
+    
+    #[test]
+    fn bad_patterns() {
+       let bad = [
+        ("bonzo %","malformed pattern (ends with '%')"),
+        ("bonzo (dog%(","unfinished capture"),
+        ("alles [%a%[","malformed pattern (missing ']')"),
+        ("bonzo (dog (cat)","unfinished capture"),
+        ("frodo %f[%A","malformed pattern (missing ']')"),
+        ("frodo (1) (2(3)%2)%1","invalid capture index %2"),
+        ];    
+        for p in bad.iter() {
+            let res = LuaPattern::new_try(p.0);
+            if let Err(e) = res {
+                assert_eq!(e, PatternError(p.1.into()));
+            } else {
+                panic!("false positive");
+            }
+        }        
     }
 }

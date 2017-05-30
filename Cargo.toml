@@ -1,6 +1,6 @@
 [package]
 name = "lua-patterns"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["steve donovan <steve.j.donovan@gmail.com>"]
 description = "Binding to Lua String Patterns"
 build = "build.rs"
@@ -9,6 +9,8 @@ repository = "https://github.com/stevedonovan/lua-patterns"
 documentation = "https://docs.rs/lua-patterns"
 
 keywords = ["string","matching","lua"]
+
+categories = ["parsing","api-bindings"]
 
 [build-dependencies]
 gcc="0.3"

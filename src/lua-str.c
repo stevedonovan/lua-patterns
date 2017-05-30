@@ -280,7 +280,7 @@ static const char *match (MatchState *ms, const char *s, const char *p) {
             const char *ep; char previous;
             p += 2;
             if (*p != '[')
-              throw_error(ms,"missing '[' after '%f' in pattern");
+              throw_error(ms,"missing '[' after '%%f' in pattern");
             ep = classend(ms, p);  /* points to what is next */
             previous = (s == ms->src_init) ? '\0' : *(s - 1);
             if (!matchbracketclass(uchar(previous), p, ep - 1) &&
@@ -410,5 +410,92 @@ int str_match (const char *s, unsigned int ls, const char *p, unsigned int lp, c
   } while (s1++ < ms.src_end && !anchor);
 
   return 0;
+}
+
+static void str_match_check(MatchState *ms, const char *p) {
+  char ch;
+  int level_stack[LUA_MAXCAPTURES];
+  int stack_idx = 0;
+  int current_level = 0;
+  while (p < ms->p_end && (ch=*p++)) {
+    switch (ch) {
+    case L_ESC: {
+        switch ((ch=*p++)) {
+        case 'b': {
+            p++;
+            if (p >= ms->p_end) throw_error(ms,"malformed pattern "
+                      "(missing arguments to  '%b')");
+        } break;
+        case 'f': {
+            if (*p != '[') throw_error(ms,"missing '[' after '%%f' in pattern");
+            --p; // so we see [...]
+        } break;
+        case '0': case '1': case '2': case '3':
+          case '4': case '5': case '6': case '7':
+          case '8': case '9': {
+                int l = uchar(ch) - '1'; //  
+                if (l < 0 || l >= ms->level || ms->capture[l].len == CAP_UNFINISHED)
+                    throw_error(ms,"invalid capture index %%%d", l + 1);  
+                --p;
+          } break;            
+        }        
+    } break;
+    case '[': {
+      do {   /* look for a `]' */
+        if (p == ms->p_end)
+          throw_error(ms,"malformed pattern (missing ']')");
+        if (*(p++) == L_ESC && p < ms->p_end)
+          p++;  /* skip escapes (e.g. `%]') */
+      } while (*p != ']');        
+    } break;
+    case '(': {
+        if (*p != ')') { /* not a position capture */
+            level_stack[stack_idx++] = ms->level;
+            ms->capture[ms->level].len = CAP_UNFINISHED;
+            ms->level ++; /* level counts total number of captures */
+            if (ms->level >= LUA_MAXCAPTURES) throw_error(ms,"too many captures");
+        } else {
+          ++p;
+        }
+    } break;
+    case ')': {        
+        if (stack_idx == 0)
+            throw_error(ms, "no open capture");
+        ms->capture[level_stack[--stack_idx]].len = CAP_POSITION;        
+    } break;
+    default: {
+        
+    }
+    }
+  }
+  if (stack_idx > 0) {
+       throw_error(ms,"unfinished capture");
+  }
+}
+
+const char *str_check (const char *p, unsigned int lp) {
+  MatchState ms;
+  int anchor = (*p == '^');
+  if (anchor) {
+    p++; /* skip anchor character */
+  } 
+  
+  memset(ms.msg_buff,0,sizeof(ms.msg_buff));
+
+  if (setjmp(ms.jump_buf) != 0) {
+     return strdup(ms.msg_buff);
+  }
+ 
+  ms.level = 0;
+  ms.matchdepth = MAXCCALLS;
+  ms.p_end = p + lp;
+  
+  if ( *(ms.p_end-1) == '%') {
+      throw_error(&ms,"malformed pattern (ends with '%')");
+  } 
+
+  str_match_check(&ms,p);
+
+  return NULL;
 }
 
