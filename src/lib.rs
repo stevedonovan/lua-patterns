@@ -57,8 +57,9 @@ static LUA_MAXCAPTURES: usize = 32;
 use std::fmt;
 use std::error::Error;
 
+/// Error type returned by _try methods
 #[derive(Debug,PartialEq)]
-pub struct PatternError(pub String);
+pub struct PatternError(String);
 
 impl fmt::Display for PatternError {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -79,10 +80,10 @@ extern {
         err_msg: *mut *mut c_char,
         mm: *mut LuaMatch
         ) -> c_int;
-        
+
     fn str_check (
         p: *const u8, lp: c_uint
-    ) -> *const i8;
+    ) -> *const c_char;
 }
 
 /// Represents a Lua string pattern and the results of a match
@@ -106,21 +107,21 @@ impl <'a> LuaPattern<'a> {
         unsafe {matches.set_len(LUA_MAXCAPTURES);}
         Ok(LuaPattern{patt: bytes, matches: matches, n_match: 0})
     }
-    
+
     /// Maybe create a new Lua pattern from a string
     pub fn new_try(patt: &'a str) -> Result<LuaPattern<'a>,PatternError> {
         LuaPattern::from_bytes_try(patt.as_bytes())
     }
-    
+
     /// Create a new Lua pattern from a string, panicking if bad
     pub fn new(patt: &'a str) -> LuaPattern<'a> {
         LuaPattern::new_try(patt).expect("bad pattern")
-    }    
-    
+    }
+
     /// Create a new Lua pattern from a slice of bytes, panicking if bad
     pub fn from_bytes (bytes: &'a [u8]) -> LuaPattern<'a> {
         LuaPattern::from_bytes_try(bytes).expect("bad pattern")
-    }    
+    }
 
     /// Match a slice of bytes with a pattern
     ///
@@ -759,7 +760,7 @@ mod tests {
         let res = m.gsub("a=2; b=3; c = 4;", "'%2':%1 ");
         assert_eq!(res,"'2':a '3':b '4':c ");
     }
-    
+
     #[test]
     fn bad_patterns() {
        let bad = [
@@ -769,7 +770,7 @@ mod tests {
         ("bonzo (dog (cat)","unfinished capture"),
         ("frodo %f[%A","malformed pattern (missing ']')"),
         ("frodo (1) (2(3)%2)%1","invalid capture index %2"),
-        ];    
+        ];
         for p in bad.iter() {
             let res = LuaPattern::new_try(p.0);
             if let Err(e) = res {
@@ -777,6 +778,6 @@ mod tests {
             } else {
                 panic!("false positive");
             }
-        }        
+        }
     }
 }
