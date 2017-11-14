@@ -174,6 +174,43 @@ impl <'a> LuaPattern<'a> {
             None
         }
     }
+    
+    /// Match a string, returning first two explicit captures if successful
+    ///
+    /// ```
+    /// let mut p = lua_patterns::LuaPattern::new("%s*(%d+)%s+(%S+)");
+    /// let (int,rest) = p.match_maybe_2(" 233   hello dolly").unwrap();
+    /// assert_eq!(int,"233");
+    /// assert_eq!(rest,"hello");
+    /// ```
+    pub fn match_maybe_2<'t>(&mut self, text: &'t str) -> Option<(&'t str,&'t str)> {
+        if self.matches(text) {
+            let cc = self.match_captures(text);
+            if cc.num_matches() != 3 { return None; }
+            Some((cc.get(1),cc.get(2)))
+        } else {
+            None
+        }
+    }
+    
+    /// Match a string, returning first three explicit captures if successful
+    ///
+    /// ```
+    /// let mut p = lua_patterns::LuaPattern::new("(%d+)/(%d+)/(%d+)");
+    /// let (y,m,d) = p.match_maybe_3("2017/11/10").unwrap();
+    /// assert_eq!(y,"2017");
+    /// assert_eq!(m,"11");
+    /// assert_eq!(d,"10");
+    /// ```
+    pub fn match_maybe_3<'t>(&mut self, text: &'t str) -> Option<(&'t str,&'t str,&'t str)> {
+        if self.matches(text) {
+            let cc = self.match_captures(text);
+            if cc.num_matches() != 4 { return None; }
+            Some((cc.get(1),cc.get(2),cc.get(3)))
+        } else {
+            None
+        }
+    }    
 
     /// Match and collect all captures as a vector of string slices
     ///
@@ -705,6 +742,14 @@ mod tests {
         assert_eq!(cc[1], "hello");
         assert_eq!(cc[2], "bonzo dog");
 
+    }
+    
+    #[test]    
+    fn multiple_captures() {
+        let mut p = LuaPattern::new("%s*(%d+)%s+(%S+)");
+        let (int,rest) = p.match_maybe_2(" 233   hello dolly").unwrap();
+        assert_eq!(int,"233");
+        assert_eq!(rest,"hello");
     }
 
     #[test]
