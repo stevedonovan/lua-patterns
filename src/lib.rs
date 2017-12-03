@@ -175,7 +175,7 @@ impl <'a> LuaPattern<'a> {
             None
         }
     }
-    
+
     /// Match a string, returning first two explicit captures if successful
     ///
     /// ```
@@ -193,7 +193,7 @@ impl <'a> LuaPattern<'a> {
             None
         }
     }
-    
+
     /// Match a string, returning first three explicit captures if successful
     ///
     /// ```
@@ -211,7 +211,7 @@ impl <'a> LuaPattern<'a> {
         } else {
             None
         }
-    }    
+    }
 
     /// Match and collect all captures as a vector of string slices
     ///
@@ -423,7 +423,7 @@ impl <'a> LuaPattern<'a> {
 }
 
 #[derive(Debug)]
-enum Subst {
+pub enum Subst {
     Text(String),
     Capture(usize)
 }
@@ -434,7 +434,7 @@ impl Subst {
     }
 }
 
-fn generate_gsub_patterns(repl: &str) -> Vec<Subst> {
+pub fn generate_gsub_patterns(repl: &str) -> Vec<Subst> {
     let mut m = LuaPattern::new("%%([%%%d])");
     let mut res = Vec::new();
     let mut slice = repl;
@@ -454,6 +454,18 @@ fn generate_gsub_patterns(repl: &str) -> Vec<Subst> {
         slice = &slice[all.end..];
     }
     res.push(Subst::new_text(slice));
+    res
+}
+
+pub fn subst(patt: &mut LuaPattern, text: &str, repl: &Vec<Subst>) -> String {
+    let mut res = String::new();
+    let captures = patt.match_captures(text);
+    for r in repl {
+        match *r {
+            Subst::Text(ref s) => res.push_str(&s),
+            Subst::Capture(i) => res.push_str(captures.get(i))
+        }
+    }
     res
 }
 
@@ -744,8 +756,8 @@ mod tests {
         assert_eq!(cc[2], "bonzo dog");
 
     }
-    
-    #[test]    
+
+    #[test]
     fn multiple_captures() {
         let mut p = LuaPattern::new("%s*(%d+)%s+(%S+)");
         let (int,rest) = p.match_maybe_2(" 233   hello dolly").unwrap();
