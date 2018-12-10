@@ -41,70 +41,26 @@
 //! }
 //! ```
 
-use std::ptr;
 use std::ops;
-use std::os::raw::{c_int,c_char,c_uint};
-use std::ffi::CStr;
 
-#[repr(C)]
-struct LuaMatch {
-    start: c_int,
-    end: c_int
-}
+pub mod errors;
+use errors::*;
+mod luapat;
+use luapat::*;
 
-static LUA_MAXCAPTURES: usize = 32;
-
-use std::fmt;
-use std::error::Error;
-
-/// Error type returned by _try methods
-#[derive(Debug,PartialEq)]
-pub struct PatternError(String);
-
-impl fmt::Display for PatternError {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f,"{}",self.0)
-	}
-}
-
-impl Error for PatternError {
-	fn description(&self) -> &str {
-		&self.0
-	}
-}
-
-#[link(name = "lua-str", kind="static")]
-extern {
-    fn str_match (
-        s: *const u8, ls: c_uint, p: *const u8, lp: c_uint,
-        err_msg: *mut *mut c_char,
-        mm: *mut LuaMatch
-        ) -> c_int;
-
-    fn str_check (
-        p: *const u8, lp: c_uint
-    ) -> *const c_char;
-}
 
 /// Represents a Lua string pattern and the results of a match
 pub struct LuaPattern<'a> {
     patt: &'a [u8],
-    matches: Vec<LuaMatch>,
+    matches: [LuaMatch; LUA_MAXCAPTURES],
     n_match: usize
 }
 
 impl <'a> LuaPattern<'a> {
     /// Maybe create a new Lua pattern from a slice of bytes
     pub fn from_bytes_try (bytes: &'a [u8]) -> Result<LuaPattern<'a>,PatternError> {
-        let mut matches: Vec<LuaMatch> = Vec::with_capacity(LUA_MAXCAPTURES);
-        unsafe {
-            let res = str_check(bytes.as_ptr(),bytes.len() as c_uint);
-            if ! res.is_null() {
-                let sres = CStr::from_ptr(res).to_str().unwrap().to_string();
-                return Err(PatternError(sres));
-            }
-        }
-        unsafe {matches.set_len(LUA_MAXCAPTURES);}
+        str_check(bytes)?;
+        let matches = [LuaMatch{start: 0, end: 0}; LUA_MAXCAPTURES];
         Ok(LuaPattern{patt: bytes, matches: matches, n_match: 0})
     }
 
@@ -133,20 +89,7 @@ impl <'a> LuaPattern<'a> {
     /// assert_eq!(&bytes[m.range()], &[0xFE,0xEE,0xEE,0xED]);
     /// ```
     pub fn matches_bytes(&mut self, s: &[u8]) -> bool {
-        let c_ptr: *mut c_char = ptr::null_mut();
-        let pvoid = Box::into_raw(Box::new(c_ptr));
-        let err_msg : *mut *mut c_char = pvoid;
-
-        unsafe {
-           self.n_match = str_match(s.as_ptr(),s.len() as c_uint,
-                self.patt.as_ptr(),self.patt.len() as c_uint,
-                err_msg, self.matches.as_mut_ptr()) as usize;
-            let ep = *err_msg;
-            if ! ep.is_null() {
-                panic!(format!("REPORT AS BUG: lua-pattern {:?}",CStr::from_ptr(ep)));
-            }
-        }
-
+        self.n_match = str_match(s,self.patt,&mut self.matches).expect("Should not fail - report as bug");
         self.n_match > 0
     }
 
@@ -236,7 +179,7 @@ impl <'a> LuaPattern<'a> {
     ///     assert_eq!(cc.get(1), "hello");
     /// }
     /// ```
-    pub fn match_captures<'b,'c>(&'c mut self, text: &'b str) -> Captures<'a,'b,'c> {
+    pub fn match_captures<'b,'c>(&'c self, text: &'b str) -> Captures<'a,'b,'c> {
         Captures {m: self, text: text}
     }
 
@@ -457,17 +400,31 @@ pub fn generate_gsub_patterns(repl: &str) -> Vec<Subst> {
     res
 }
 
-pub fn subst(patt: &mut LuaPattern, text: &str, repl: &Vec<Subst>) -> String {
-    let mut res = String::new();
-    let captures = patt.match_captures(text);
-    for r in repl {
-        match *r {
-            Subst::Text(ref s) => res.push_str(&s),
-            Subst::Capture(i) => res.push_str(captures.get(i))
+pub struct Substitute {
+    repl: Vec<Subst>
+}
+
+impl Substitute {
+    pub fn new(repl: &str) -> Substitute {
+        Substitute{
+            repl: generate_gsub_patterns(repl)
         }
     }
-    res
+
+    pub fn subst(&self, patt: &LuaPattern, text: &str) -> String {
+        let mut res = String::new();
+        let captures = patt.match_captures(text);
+        for r in &self.repl {
+            match *r {
+                Subst::Text(ref s) => res.push_str(&s),
+                Subst::Capture(i) => res.push_str(captures.get(i))
+            }
+        }
+        res
+    }
+
 }
+
 
 
 /// Low-overhead convenient access to string match captures

@@ -8,7 +8,6 @@ fn main() {
     //~ m.matches("hello");
     //~ println!("ok");
 
-    ///*
     let mut m = lp::LuaPattern::new("(%a+)");
     let mut iter = m.gmatch("one two three");
     assert_eq!(iter.next(), Some("one"));

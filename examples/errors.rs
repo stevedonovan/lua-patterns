@@ -1,4 +1,5 @@
 extern crate lua_patterns;
+use lua_patterns::errors::PatternError;
 
 fn main() {
    let bad = [
@@ -8,12 +9,12 @@ fn main() {
     ("bonzo (dog (cat)","unfinished capture"),
     ("frodo %f[%A","malformed pattern (missing ']')"),
     ("frodo (1) (2(3)%2)%1","invalid capture index %2"),
-    ];    
-    
-    fn error(s: &str) -> lua_patterns::PatternError {
-            lua_patterns::PatternError(s.into())
+    ];
+
+    fn error(s: &str) -> PatternError {
+            PatternError(s.into())
     }
-    
+
     for p in bad.iter() {
         let res = lua_patterns::LuaPattern::new_try(p.0);
         if let Err(e) = res {
@@ -21,6 +22,6 @@ fn main() {
         } else {
             println!("'{}' was fine",p.0);
         }
-   } 
-    
+   }
+
 }
