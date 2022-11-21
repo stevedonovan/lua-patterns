@@ -390,16 +390,16 @@ impl MatchState {
         let mut s = s;
         /* pattern class plus optional suffix */
         let ep = self.classend(p)?; /* points to optional suffix */
+        let epc = if ep == self.p_end { 0 } else { at(ep) };
         /* does not match at least once? */
         if ! self.singlematch(s, p, ep) {
-            let epc = at(ep);
             if epc == b'*' || epc == b'?' || epc == b'-' { /* accept empty? */
                 return self.patt_match(s, next(ep));
             } else { /* '+' or no suffix */
                 s = null(); /* fail */
             }
         } else { /* matched once */
-            match at(ep) { /* handle optional suffix */
+            match epc { /* handle optional suffix */
                 b'?' => {
                     let res = self.patt_match(next(s),next(ep))?;
                     if ! res.is_null() {
